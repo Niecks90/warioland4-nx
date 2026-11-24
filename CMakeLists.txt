@@ -1,0 +1,281 @@
+cmake_minimum_required(VERSION 3.20)
+project(MarioKartSuperCircuitRecomp VERSION 0.2.1 LANGUAGES C CXX)
+
+set(CMAKE_C_STANDARD 11)
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+if(ANDROID)
+    set(_netplay_default OFF)
+else()
+    set(_netplay_default ON)
+endif()
+option(GBARECOMP_NETPLAY "Build desktop link-cable netplay" ${_netplay_default})
+
+set(GBARECOMP_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/gbarecomp"
+    CACHE PATH "Path to this game's gbarecomp worktree")
+set(RECOMP_UI_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/recomp-ui"
+    CACHE PATH "Path to the shared recomp-ui checkout")
+set(GBARECOMP_RUNTIME_UI_ROOT "${RECOMP_UI_ROOT}"
+    CACHE PATH "recomp-ui root used by the live GBA runtime adapter")
+if (CMAKE_SYSTEM_NAME STREQUAL "Switch" OR __SWITCH__ OR SWITCH)
+    set(GBARECOMP_RUNTIME_UI_ROOT "" CACHE PATH "" FORCE)
+    set(RECOMP_UI_ROOT "" CACHE PATH "" FORCE)
+endif()
+set(GBARECOMP_SELFHEAL_RECOMPILE_DEFAULT ON CACHE BOOL
+    "Enable Mario Kart: Super Circuit runtime self-heal sharding by default" FORCE)
+set(GBARECOMP_ENABLE_MODS ON CACHE BOOL
+    "Enable Mario Kart: Super Circuit's mod catalog and GBA mod packages" FORCE)
+
+if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/gbarecomp/CMakeLists.txt")
+    message(STATUS "gbarecomp checkout not found. Cloning gbarecomp recursively...")
+    execute_process(
+        COMMAND git clone --depth 1 --recurse-submodules https://github.com/mstan/gbarecomp.git "${CMAKE_CURRENT_SOURCE_DIR}/gbarecomp"
+        RESULT_VARIABLE GBARECOMP_CLONE_RES
+    )
+    if(NOT GBARECOMP_CLONE_RES EQUAL 0)
+        message(FATAL_ERROR "Failed to clone gbarecomp repository")
+    endif()
+endif()
+
+if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/gbarecomp/external/arm-recomp-core/cmake/ArmRecompCore.cmake")
+    message(STATUS "Updating gbarecomp submodules...")
+    execute_process(
+        COMMAND git -C "${CMAKE_CURRENT_SOURCE_DIR}/gbarecomp" submodule update --init --depth 1 --recursive
+    )
+endif()
+
+configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/switch/host_window.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/gbarecomp/src/runtime/host_window.cpp"
+    COPYONLY
+)
+configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/switch/overlay_compile.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/gbarecomp/src/runtime/overlay_compile.cpp"
+    COPYONLY
+)
+configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/switch/gba_ppu.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/gbarecomp/src/gba/gba_ppu.cpp"
+    COPYONLY
+)
+configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/switch/host_platform.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/gbarecomp/src/runtime/host_platform.cpp"
+    COPYONLY
+)
+
+
+set(GBARECOMP_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/gbarecomp" CACHE PATH "Path to gbarecomp")
+
+if(NOT EXISTS "${GBARECOMP_ROOT}/CMakeLists.txt")
+    message(FATAL_ERROR
+        "GBARECOMP_ROOT is not a gbarecomp checkout:\n"
+        "  ${GBARECOMP_ROOT}\n"
+        "Configure with -DGBARECOMP_ROOT=<path> if the local worktree link is absent.")
+endif()
+
+if (CMAKE_SYSTEM_NAME STREQUAL "Switch" OR __SWITCH__ OR SWITCH)
+    remove_definitions(-DGBARECOMP_RUNTIME_UI)
+    set(GBARECOMP_RUNTIME_UI_ROOT "" CACHE PATH "" FORCE)
+    set(GBARECOMP_RUNTIME_UI OFF CACHE BOOL "" FORCE)
+    set(RECOMP_UI_ROOT "" CACHE PATH "" FORCE)
+    add_compile_definitions(SWITCH)
+    add_definitions(-U GBARECOMP_RUNTIME_UI)
+endif()
+set(GBARECOMP_NETPLAY OFF)
+set(GBAGAME_RECOMP_UI OFF)
+
+if (CMAKE_SYSTEM_NAME STREQUAL "Switch" OR __SWITCH__ OR SWITCH)
+    set(GBARECOMP_RUNTIME_UI_ROOT "" CACHE PATH "" FORCE)
+endif()
+set(GBARECOMP_SCANLINE_IMPLEMENTATION "HLE" CACHE STRING "" FORCE)
+add_subdirectory("${GBARECOMP_ROOT}" gbarecomp_build EXCLUDE_FROM_ALL)
+enable_testing()
+add_executable(mksc_extended_view_tests
+    tests/extended_view_tests.cpp
+    "${GBARECOMP_ROOT}/tools/bios_smoke/dispatch_stub.cpp"
+    src/mksc_extended_view.cpp src/mksc_margin_objects.cpp)
+target_include_directories(mksc_extended_view_tests PRIVATE
+    src "${GBARECOMP_ROOT}/src/runtime")
+target_link_gbarecomp_runtime_stack(mksc_extended_view_tests)
+add_test(NAME mksc_extended_view COMMAND mksc_extended_view_tests)
+
+add_executable(mksc_margin_objects_tests tests/margin_objects_tests.cpp
+    "${GBARECOMP_ROOT}/tools/bios_smoke/dispatch_stub.cpp" src/mksc_margin_objects.cpp)
+target_include_directories(mksc_margin_objects_tests PRIVATE src "${GBARECOMP_ROOT}/src/runtime")
+target_link_gbarecomp_runtime_stack(mksc_margin_objects_tests)
+add_test(NAME mksc_margin_objects COMMAND mksc_margin_objects_tests)
+
+set(GBA_GAME_GENERATED_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/generated" CACHE PATH
+    "Generated native corpus (may point at an independent qualification build)")
+if(EXISTS "${GBA_GAME_GENERATED_ROOT}/recompiled.cpp")
+    message(FATAL_ERROR
+        "Stale monolithic generated/recompiled.cpp found. "
+        "Run tools/regen.ps1 with the current gbarecomp before building.")
+endif()
+file(GLOB GAME_GENERATED_SOURCES CONFIGURE_DEPENDS
+    "${GBA_GAME_GENERATED_ROOT}/*.c"
+    "${GBA_GAME_GENERATED_ROOT}/*.cpp")
+
+add_executable(MarioKartSuperCircuitRecomp
+    src/main.cpp
+    src/mksc_extended_view.cpp
+    src/mksc_margin_objects.cpp
+    src/mods/mksc_adaptive_view_plugin.cpp
+    src/mods/mksc_track_60fps_plugin.cpp
+    src/mods/mksc_internal_resolution_plugin.cpp
+)
+
+file(GLOB GENERATED_GAME_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/generated/*.cpp")
+message(STATUS "Building with generated game sources")
+target_sources(MarioKartSuperCircuitRecomp PRIVATE ${GENERATED_GAME_SOURCES})
+
+
+
+if(NINTENDO_SWITCH OR __SWITCH__ OR SWITCH)
+
+
+
+
+
+endif()
+target_include_directories(MarioKartSuperCircuitRecomp PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/generated")
+
+# Keep every generated guest shard cheaper to compile than the runtime. The
+# dispatch table and symbol map remain ordinary small generated units.
+set(GAME_RECOMPILED_SOURCES ${GAME_GENERATED_SOURCES})
+list(FILTER GAME_RECOMPILED_SOURCES INCLUDE REGEX
+    "/recompiled_[0-9]+\\.cpp$")
+set(MKSC_GENERATED_OPTIMIZATION "O2" CACHE STRING "Generated CPU optimization: O1 or O2")
+set_property(CACHE MKSC_GENERATED_OPTIMIZATION PROPERTY STRINGS O1 O2)
+if(NOT MKSC_GENERATED_OPTIMIZATION MATCHES "^(O1|O2)$")
+    message(FATAL_ERROR "MKSC_GENERATED_OPTIMIZATION must be O1 or O2")
+endif()
+if(GAME_RECOMPILED_SOURCES)
+    set_source_files_properties(${GAME_RECOMPILED_SOURCES} PROPERTIES
+        COMPILE_OPTIONS "-${MKSC_GENERATED_OPTIMIZATION};-g0")
+endif()
+
+target_include_directories(MarioKartSuperCircuitRecomp PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/generated"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    "${GBARECOMP_ROOT}/src/armv4t"
+    "${GBARECOMP_ROOT}/src/gba"
+    "${GBARECOMP_ROOT}/src/runtime"
+    "${GBARECOMP_ROOT}/src/debug")
+
+if(NINTENDO_SWITCH OR __SWITCH__ OR SWITCH)
+    include_directories(
+        /opt/devkitpro/portlibs/switch/include
+        /opt/devkitpro/portlibs/switch/include/SDL2
+        $ENV{DEVKITPRO}/portlibs/switch/include
+        $ENV{DEVKITPRO}/portlibs/switch/include/SDL2
+    )
+endif()
+
+target_link_libraries(MarioKartSuperCircuitRecomp PRIVATE
+    "-Wl,--start-group"
+    gbarecomp_runtime
+    gbarecomp_debug
+    gbarecomp_gba
+    gbarecomp_armv4t
+    "-Wl,--end-group")
+
+
+if(NINTENDO_SWITCH OR __SWITCH__ OR SWITCH)
+    target_compile_definitions(MarioKartSuperCircuitRecomp PRIVATE SWITCH)
+    target_link_directories(MarioKartSuperCircuitRecomp PRIVATE
+        /opt/devkitpro/portlibs/switch/lib
+        /opt/devkitpro/libnx/lib
+    )
+
+    target_link_options(MarioKartSuperCircuitRecomp PRIVATE
+        "-L/opt/devkitpro/portlibs/switch/lib"
+        "-L/opt/devkitpro/libnx/lib"
+    )
+
+    target_link_libraries(MarioKartSuperCircuitRecomp PRIVATE
+        /opt/devkitpro/portlibs/switch/lib/libSDL2.a
+        /opt/devkitpro/portlibs/switch/lib/libEGL.a
+        /opt/devkitpro/portlibs/switch/lib/libGLESv2.a
+        /opt/devkitpro/portlibs/switch/lib/libglapi.a
+        /opt/devkitpro/portlibs/switch/lib/libdrm_nouveau.a
+        /opt/devkitpro/libnx/lib/libnx.a
+        m
+    )
+    target_link_libraries(MarioKartSuperCircuitRecomp PRIVATE gbarecomp_runtime gbarecomp_armv4t)
+
+    add_custom_command(TARGET MarioKartSuperCircuitRecomp POST_BUILD
+        COMMAND nacptool --create "Mario Kart Super Circuit Recomp" "Niecks90" "0.2.1" $<TARGET_FILE_DIR:MarioKartSuperCircuitRecomp>/mksc_nx.nacp
+        COMMAND elf2nro $<TARGET_FILE:MarioKartSuperCircuitRecomp> $<TARGET_FILE_DIR:MarioKartSuperCircuitRecomp>/mksc_nx.nro --nacp=$<TARGET_FILE_DIR:MarioKartSuperCircuitRecomp>/mksc_nx.nacp --icon=${CMAKE_CURRENT_SOURCE_DIR}/switch/icon.png
+        COMMENT "Generating mksc_nx.nro"
+    )
+endif()
+
+target_compile_definitions(MarioKartSuperCircuitRecomp PRIVATE
+    MKSC_VERSION="${PROJECT_VERSION}"
+    GBARECOMP_DEFAULT_DEBUG_PORT=19872
+    GBARECOMP_WINDOW_TITLE="MarioKartSuperCircuitRecomp"
+    GBARECOMP_DEFAULT_GAME_CONFIG="game.toml")
+if(GBARECOMP_NETPLAY)
+    target_link_libraries(MarioKartSuperCircuitRecomp PRIVATE gbarecomp_netplay)
+    gbarecomp_target_netplay_identity(MarioKartSuperCircuitRecomp "${CMAKE_CURRENT_SOURCE_DIR}" "${GBA_GAME_GENERATED_ROOT}")
+    set_property(SOURCE src/main.cpp APPEND PROPERTY COMPILE_DEFINITIONS GBAGAME_NETPLAY=1)
+endif()
+
+# Keep recomp-ui and its Dear ImGui sources isolated from the generated guest
+# shards. Only this small bridge and main.cpp know that the launcher exists.
+option(GBAGAME_RECOMP_UI "Build the recomp-ui pre-boot launcher" ON)
+if(GBAGAME_RECOMP_UI)
+    include(${RECOMP_UI_ROOT}/recomp_ui.cmake)
+    add_library(game_launcher_ui STATIC src/game_launcher_boot.cpp)
+    target_include_directories(game_launcher_ui PRIVATE
+        "${GBARECOMP_ROOT}/src/runtime"
+        "${GBARECOMP_ROOT}/src/gba"
+        src)
+    target_compile_definitions(game_launcher_ui PRIVATE
+        GBARECOMP_ENABLE_MODS=1)
+    recomp_target_launcher_ui(game_launcher_ui
+        CONSOLE gba
+        BOXART ${CMAKE_CURRENT_SOURCE_DIR}/recomp/launcher/boxart.tga)
+    if(GBARECOMP_NETPLAY)
+        gbarecomp_target_netplay_launcher(game_launcher_ui)
+    endif()
+    find_package(SDL2 REQUIRED)
+    target_link_libraries(game_launcher_ui PUBLIC SDL2::SDL2)
+    if(WIN32)
+        target_link_libraries(game_launcher_ui PUBLIC opengl32)
+    endif()
+    target_link_libraries(MarioKartSuperCircuitRecomp PRIVATE game_launcher_ui)
+    set_property(SOURCE src/main.cpp APPEND PROPERTY
+        COMPILE_DEFINITIONS GBAGAME_RECOMP_UI)
+endif()
+
+if(GBARECOMP_NETPLAY AND NOT ANDROID)
+    gbarecomp_target_netplay_view_probe(MarioKartSuperCircuitRecomp tests/netplay_view_probe.cpp)
+endif()
+
+# Ship the game-owned, disabled-by-default enhancement packages beside the
+# executable so recomp-ui can expose them in the Mods tab.
+set(MKSC_PRELOADED_MODS "${CMAKE_CURRENT_SOURCE_DIR}/mods/preloaded")
+if(EXISTS "${MKSC_PRELOADED_MODS}/packages")
+    add_custom_command(TARGET MarioKartSuperCircuitRecomp POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${MKSC_PRELOADED_MODS}"
+            "$<TARGET_FILE_DIR:MarioKartSuperCircuitRecomp>/mods"
+        COMMENT "Preloading the Mario Kart: Super Circuit mod catalog")
+endif()
+
+if(MSVC)
+    target_link_options(MarioKartSuperCircuitRecomp PRIVATE /STACK:16777216)
+elseif(MINGW OR WIN32)
+    target_link_options(MarioKartSuperCircuitRecomp PRIVATE -Wl,--stack,16777216)
+endif()
+
+if(NOT ANDROID)
+    enable_testing()
+    add_executable(mksc_flash_dispatch_test EXCLUDE_FROM_ALL tests/flash_dispatch_test.cpp)
+    target_include_directories(mksc_flash_dispatch_test PRIVATE "${GBARECOMP_ROOT}/src/armv4t")
+    add_test(NAME mksc_flash_dispatch_test COMMAND mksc_flash_dispatch_test)
+endif()
