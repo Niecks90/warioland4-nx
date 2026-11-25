@@ -261,3 +261,48 @@ void web_notify_storage_write(WebStorageWrite kind, bool ok);
 #endif
 
 }  // namespace gbarecomp
+
+#if defined(__SWITCH__)
+extern "C" {
+
+enum Wl4WidescreenMode {
+    WL4_WS_AUTO = 0,
+    WL4_WS_FORCE = 1,
+    WL4_WS_CLASSIC = 2
+};
+
+enum Wl4VideoFilter {
+    WL4_FILTER_NEAREST = 0,
+    WL4_FILTER_BILINEAR = 1,
+    WL4_FILTER_SHARP4X = 2,
+    WL4_FILTER_LCD_GRID = 3
+};
+
+enum Wl4ColorMode {
+    WL4_COLOR_RAW = 0,
+    WL4_COLOR_BACKLIT = 1,
+    WL4_COLOR_FRONTLIT = 2,
+    WL4_COLOR_UNLIT = 3,
+    WL4_COLOR_CLASSIC = 4
+};
+
+struct Wl4QolConfig {
+    int widescreen_mode;   // Wl4WidescreenMode (default WL4_WS_AUTO)
+    int video_filter;      // Wl4VideoFilter (default WL4_FILTER_NEAREST)
+    int color_mode;        // Wl4ColorMode (default WL4_COLOR_RAW)
+    int show_fps;          // 0 or 1
+    int vsync;             // 0 or 1 (default 0)
+    int uncapped;          // 0 or 1
+    int cpu_boost;         // 0=Normal, 1=FastLoad, 2=Type2
+    int audio_enabled;     // 0 or 1 (default 1)
+    int bios_hle;          // 0 or 1 (default 1)
+    int reset_requested;   // set to 1 to trigger game reset
+    char config_path[256];
+    char savestate_dir[256];
+    void (*save_config_fn)(void);
+};
+
+extern Wl4QolConfig g_wl4_qol;
+
+}  // extern "C"
+#endif

@@ -172,7 +172,7 @@ void GbaPpu::deserialize(gbarecomp::debug::SnapshotReader& r) {
         // state-epoch hook has invalidated/rebuilt its margin caches. Fail those
         // unauthored margins closed for that interim render; the game's normal
         // publish policy reauthorizes them once restored-state data is ready.
-        g_ws_pillarbox = g_ws_authored_margin_layers ? 0 : 1;
+        g_ws_pillarbox = 0;
         g_ws_pillarbox_left = 0;
         g_ws_pillarbox_right = 0;
     }
@@ -1422,8 +1422,16 @@ void render_scanline_wide(uint8_t* rgb, int y, uint16_t dispcnt,
     };
     auto win_h_in = [&](uint32_t hreg, int hx) -> bool {
         uint32_t h  = static_cast<uint32_t>(io[hreg] | (io[hreg + 1] << 8));
-        int x1 = static_cast<int>((h >> 8) & 0xFFu), x2 = static_cast<int>(h & 0xFFu);
+        int x1 = static_cast<int>((h >> 8) & 0xFFu);
+        int x2 = static_cast<int>(h & 0xFFu);
         if (x2 > static_cast<int>(kVanW) || x1 > x2) x2 = static_cast<int>(kVanW);
+        if (x1 >= x2) return false;
+        if (!g_ws_pillarbox) {
+            if (x1 == 0) x1 = -static_cast<int>(ox);
+            if (x2 >= static_cast<int>(kVanW)) {
+                x2 = static_cast<int>(out_w) - static_cast<int>(ox);
+            }
+        }
         return hx >= x1 && hx < x2;
     };
     const bool win0_row = win0_en && win_v_row(0x44, y);

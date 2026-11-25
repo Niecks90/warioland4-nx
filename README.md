@@ -7,6 +7,19 @@ The game ROM and Nintendo GBA BIOS are **not included**. You must supply your ow
 
 ---
 
+## Changelog — v0.1.1
+
+- **Widescreen Gameplay & Smart Auto-Pillarboxing (`16:9 Auto` / `16:9 Force` / `Classic GBA (3:2)`)**:
+  - Fixed GBA hardware window bounds (`WIN0H` / `WIN1H`) in `switch/gba_ppu.cpp` so full-width gameplay windows (`x1 == 0` / `x2 >= 240`) extend into the 16:9 margins during gameplay (`GameScreenSubroutine`, `gMainGameMode == 2 || 8`) instead of falling through to `WINOUT` black bars, while keeping inner iris/spotlight effects authentic.
+  - Fixed `GbaPpu::deserialize` so loading a save state no longer sticks `g_ws_pillarbox = 1`.
+  - Added `wario_extended_view_frame` smart pillarboxing: automatically pillarboxes bitmap modes, no-BG BIOS frames, and static 256px intro/title screens while keeping playable stages and scrolling cutscenes in full `284×160` widescreen.
+- **In-Game QoL Quick Menu (Hold `-` ~450 ms)**:
+  - Lightweight SDL2 overlay menu (embedded 5×7 font, zero external font assets) that pauses GBA execution and mutes audio cleanly while open.
+  - **5 Save State Slots** stored in `sdmc:/switch/warioland4-nx/savestates/slot_N.state` with timestamps and toast feedback.
+  - **Live Aspect Ratio / Widescreen** (`16:9 Auto`, `16:9 Force`, `Classic GBA (3:2)`), **Video Filters** (`Nearest`, `Bilinear`, `Sharp 4x`, `GBA LCD Grid`), **GBA Color Correction** (`Raw`, `Backlit`, `Frontlit`, `Unlit`, `Classic`), **FPS + Frame-time HUD**, **VSync**, **Audio**, **CPU Boost**, **Reset Game**, and persistent `config.txt` saving.
+  - Preserved short tap on `-` for GBA `SELECT` and `+` + `-` held together to exit cleanly.
+- **Custom Application Icon**: Added a custom 256×256 RGB Homebrew Menu icon (`switch/icon.jpg`) and updated NACP metadata (`Wario Land 4` / `0.1.1`).
+
 ## Changelog — v0.1.0
 
 - **Initial Nintendo Switch Port (`warioland4-nx`)**: Ported [Zaxaerith/WarioLand4Recomp](https://github.com/Zaxaerith/WarioLand4Recomp) onto our Switch-optimized `gbarecomp` runtime base (`build/warioland4-nx.nro`).
@@ -29,8 +42,11 @@ Create `sdmc:/switch/warioland4_nx/` on your SD card and place the files as foll
  ├── warioland4-nx.nro   (Homebrew executable)
  ├── rom.gba             (Wario Land 4 USA/Europe ROM — or "Wario Land 4 (USA, Europe).gba")
  ├── gba_bios.bin        (Retail GBA BIOS — mandatory)
- ├── config.txt          (Auto-created on first launch)
+ ├── config.txt          (Auto-created on first launch, updated by the QoL menu)
  └── save/               (Auto-created directory containing wario_land_4_awae.sav)
+
+/switch/warioland4-nx/savestates/
+ └── slot_1.state .. slot_5.state   (In-game save states created from the QoL menu)
 ```
 
 ### Required ROM & BIOS Identity
@@ -55,21 +71,24 @@ Create `sdmc:/switch/warioland4_nx/` on your SD card and place the files as foll
 | **L / ZL** | L |
 | **R / ZR** | R |
 | **+ (Plus)** | Start (Pause / Confirm) |
-| **- (Minus)** | Select |
+| **- (Minus) (Tap)** | Select |
+| **- (Minus) (Hold ~450 ms)** | Open / Close In-Game QoL Menu (Save States, Aspect, Filters, Colors) |
 | **+ and - Held Together** | Exit cleanly to Homebrew Menu |
 
 ---
 
 ## Configuration (`config.txt`)
 
-On first launch, `sdmc:/switch/warioland4_nx/config.txt` is automatically created with:
+On first launch, `sdmc:/switch/warioland4_nx/config.txt` is automatically created (and saved automatically when changed in the QoL menu) with:
 
 ```ini
 widescreen = 1
+video_filter = nearest
+color_mode = raw
+linear_filter = 0
 vsync = 0
 uncapped = 0
 cpu_boost = 0
-linear_filter = 0
 show_fps = 0
 audio = 1
 bios_hle = 1
@@ -77,9 +96,12 @@ bios_hle = 1
 
 ### Options
 
-- **`widescreen`** (`1` or `0`):
-  - `1` *(Default)*: 16:9 widescreen (`284×160`) scaled cleanly to `1280×720`.
-  - `0`: Authentic 3:2 aspect ratio (`240×160`) centered with black pillarboxing.
+- **`widescreen`** (`0`, `1`, or `2` / `classic`, `auto`, `force`):
+  - `1` / `auto` *(Default)*: `16:9 Auto` — fills `1280×720` (`284×160`) in gameplay and scrolling cutscenes while cleanly letterboxing static 256px BIOS/title screens.
+  - `2` / `force`: `16:9 Force` — forces full `284×160` widescreen everywhere.
+  - `0` / `classic`: `Classic GBA (3:2)` — authentic centered `240×160` (`1080×720` on 720p) with black pillarboxing.
+- **`video_filter`**: `nearest` *(Default)*, `bilinear`, `sharp4x` (`4×` integer prescale + linear crispness), or `lcd` (`Sharp 4×` + subtle GBA LCD pixel grid).
+- **`color_mode`**: `raw` *(Default)*, `backlit` (AGS-101/DS), `frontlit` (AGB/SP Frontlight), `unlit` (original reflective AGB-001), or `classic` (desaturated handheld curve).
 - **`vsync`** (`0` or `1`):
   - `0` *(Default)*: Uses the Horizon-native `FramePacer` at `59.7275 Hz` without blocking Core 1 on HDMI scanout.
   - `1`: Enables `SDL_RENDERER_PRESENTVSYNC`.
@@ -88,8 +110,7 @@ bios_hle = 1
   - `0` *(Default)*: Normal mode (`1020 MHz` CPU, un-throttled GPU/EMC).
   - `1`: FastLoad (`1785 MHz` CPU).
   - `2`: Type2 (`1020 MHz` CPU, minimum GPU).
-- **`linear_filter`** (`0` or `1`): `0` uses crisp nearest-neighbor scaling; `1` enables bilinear filtering.
-- **`show_fps`** (`0` or `1`): Displays an on-screen FPS counter.
+- **`show_fps`** (`0` or `1`): Displays an on-screen FPS + frame-time (`ms`) HUD overlay.
 - **`audio`** (`1` or `0`): Enables or disables audio output.
 - **`bios_hle`** (`1` or `0`): `1` *(Default)* enables fast BIOS SWI HLE with recompiled LLE fallback; `0` runs pure recompiled BIOS LLE.
 

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(WarioLand4Recomp VERSION 0.1.0 LANGUAGES C CXX)
+project(WarioLand4Recomp VERSION 0.1.1 LANGUAGES C CXX)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 20)
@@ -176,8 +176,8 @@ if(NINTENDO_SWITCH OR __SWITCH__ OR SWITCH)
     target_link_libraries(WarioLand4Recomp PRIVATE gbarecomp_runtime gbarecomp_armv4t)
 
     add_custom_command(TARGET WarioLand4Recomp POST_BUILD
-        COMMAND nacptool --create "Wario Land 4 Recomp" "Niecks90" "${PROJECT_VERSION}" $<TARGET_FILE_DIR:WarioLand4Recomp>/warioland4_nx.nacp
-        COMMAND elf2nro $<TARGET_FILE:WarioLand4Recomp> $<TARGET_FILE_DIR:WarioLand4Recomp>/warioland4-nx.nro --nacp=$<TARGET_FILE_DIR:WarioLand4Recomp>/warioland4_nx.nacp --icon=${CMAKE_CURRENT_SOURCE_DIR}/switch/icon.png
+        COMMAND nacptool --create "Wario Land 4" "Niecks90" "${PROJECT_VERSION}" $<TARGET_FILE_DIR:WarioLand4Recomp>/warioland4_nx.nacp
+        COMMAND elf2nro $<TARGET_FILE:WarioLand4Recomp> $<TARGET_FILE_DIR:WarioLand4Recomp>/warioland4-nx.nro --nacp=$<TARGET_FILE_DIR:WarioLand4Recomp>/warioland4_nx.nacp --icon=${CMAKE_CURRENT_SOURCE_DIR}/switch/icon.jpg
         COMMENT "Generating warioland4-nx.nro"
     )
 endif()

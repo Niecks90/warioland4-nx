@@ -24,6 +24,7 @@ saves/
 *.bmp
 *.png
 !switch/icon.png
+!switch/icon.jpg
 bios.cfg
 rom.cfg
 config.ini
@@ -32,6 +33,7 @@ recomp_coverage*.json
 recomp_master_misses*.toml.frag
 recomp_seed_proposals.toml
 TASK.md
+TASK_QOL.md
 .vs/
 .vscode/
 __pycache__/
