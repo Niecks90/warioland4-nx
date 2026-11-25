@@ -11,14 +11,27 @@ cd build
 cmake .. \
   -DCMAKE_TOOLCHAIN_FILE=/opt/devkitpro/cmake/Switch.cmake \
   -DCMAKE_BUILD_TYPE=Release \
-  -DCMAKE_CXX_FLAGS_RELEASE="-O3 -mcpu=cortex-a57+crypto -mtune=cortex-a57" \
+  -DCMAKE_CXX_FLAGS_RELEASE="-O3 -mcpu=cortex-a57+fp+simd -mtune=cortex-a57 -fomit-frame-pointer" \
   -DGBARECOMP_SCANLINE_IMPLEMENTATION=HLE
 
 if [ -f ../switch/host_window.h ] && [ -d ../gbarecomp/src/runtime ]; then
     cp -f ../switch/host_window.h ../gbarecomp/src/runtime/host_window.h
 fi
+if [ -f ../switch/host_window.cpp ] && [ -d ../gbarecomp/src/runtime ]; then
+    cp -f ../switch/host_window.cpp ../gbarecomp/src/runtime/host_window.cpp
+fi
 if [ -f ../switch/host_platform.cpp ] && [ -d ../gbarecomp/src/runtime ]; then
     cp -f ../switch/host_platform.cpp ../gbarecomp/src/runtime/host_platform.cpp
 fi
+if [ -f ../switch/overlay_compile.cpp ] && [ -d ../gbarecomp/src/runtime ]; then
+    cp -f ../switch/overlay_compile.cpp ../gbarecomp/src/runtime/overlay_compile.cpp
+fi
+if [ -f ../switch/gba_ppu.cpp ] && [ -d ../gbarecomp/src/gba ]; then
+    cp -f ../switch/gba_ppu.cpp ../gbarecomp/src/gba/gba_ppu.cpp
+fi
 
-make -j$(nproc)
+JOBS=$(nproc)
+if [ "$JOBS" -gt 4 ]; then
+    JOBS=4
+fi
+make -j"$JOBS"

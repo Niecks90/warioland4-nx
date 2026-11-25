@@ -1,37 +1,48 @@
+#include <algorithm>
+#include <cctype>
+#include <cstdarg>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
+#include <exception>
 #include <string>
 #include <vector>
-#include <algorithm>
 
 #include "runtime.h"
-#include "mksc_extended_view.h"
-#include "mksc_flash_dispatch.h"
-#if defined(GBAGAME_NETPLAY)
-#include "multiplayer_launch.h"
-#include "gba_netplay_build_identity.h"
-#endif
-
+#include "runtime_arm.h"
 #if defined(GBAGAME_RECOMP_UI)
 #include "game_launcher_boot.h"
 #endif
 
-
-
 #if defined(__SWITCH__)
 #include <SDL.h>
-#include <unistd.h>
+#include <fstream>
 #include <switch.h>
 #include <sys/stat.h>
 #include <sys/types.h>
-#include <fstream>
-#include <iostream>
-#include <stdio.h>
-#include <cstdarg>
-#include <exception>
+#include <unistd.h>
+#endif
 
-void log_boot(const char* fmt, ...) {
-    FILE* f = fopen("sdmc:/switch/mksc_nx/boot.log", "a");
+namespace {
+
+// Wario Land 4 dynamic IWRAM stack code execution:
+// The cartridge writes Thumb return/pop stubs on the stack in 0x03007D0C..0x03007D90.
+// Because these addresses and stack contents vary dynamically from run to run,
+// they cannot and must not be declared as static [[code_copy]].
+// Instead, they are interpreted directly from live IWRAM memory through
+// g_runtime_force_interp_hook, eliminating any dependence on runtime GCC self-heal.
+extern "C" int wario_force_interp_hook(uint32_t pc, int /*thumb*/) {
+    if (pc >= 0x03007D00u && pc < 0x03007E00u) {
+        return 1;
+    }
+    return 0;
+}
+
+}  // namespace
+
+#if defined(__SWITCH__)
+static void log_boot(const char* fmt, ...) {
+    FILE* f = fopen("sdmc:/switch/warioland4_nx/boot.log", "a");
     if (f) {
         va_list args, args_copy;
         va_start(args, fmt);
@@ -46,10 +57,7 @@ void log_boot(const char* fmt, ...) {
 }
 
 extern "C" const uint32_t kDispatchTableLen;
-extern "C" int gba_mod_set_adaptive_view_enabled(int);
-extern "C" int gba_mod_set_60fps_track_enabled(int);
 extern "C" bool g_config_audio = true;
-extern "C" void gba_mod_set_adaptive_view_user_config(int enabled);
 bool g_config_show_fps = false;
 
 struct GameThreadArgs {
@@ -67,6 +75,7 @@ static void game_runner_thread(void* arg) {
              1u << 1, affinity_rc, svcGetCurrentProcessorNumber());
     try {
         log_boot("Starting gbarecomp runtime inside 32 MiB stack thread...\n");
+        g_runtime_force_interp_hook = &wario_force_interp_hook;
         ctx->return_code = gbarecomp::run_game(ctx->argc, ctx->argv, *ctx->opts);
         log_boot("Exited gbarecomp runtime cleanly with code %d.\n", ctx->return_code);
     } catch (const std::exception& e) {
@@ -77,7 +86,6 @@ static void game_runner_thread(void* arg) {
         ctx->return_code = 1;
     }
 }
-
 #endif
 
 int main(int argc, char** argv) {
@@ -90,10 +98,10 @@ int main(int argc, char** argv) {
     });
 
     mkdir("sdmc:/switch", 0777);
-    mkdir("sdmc:/switch/mksc_nx", 0777);
-    mkdir("sdmc:/switch/mksc_nx/save", 0777);
-    chdir("sdmc:/switch/mksc_nx");
-    setenv("GBARECOMP_BIOS_HLE", "1", 1);
+    mkdir("sdmc:/switch/warioland4_nx", 0777);
+    mkdir("sdmc:/switch/warioland4_nx/save", 0777);
+    chdir("sdmc:/switch/warioland4_nx");
+    setenv("GBARECOMP_SELFHEAL_RECOMPILE", "0", 1);
     setenv("GBARECOMP_DIAGNOSTICS", "0", 1);
     // On Switch, calling present() with SDL_RENDERER_PRESENTVSYNC on the
     // emulation thread (Core 1) causes SDL_RenderPresent to block up to
@@ -103,42 +111,47 @@ int main(int argc, char** argv) {
     setenv("GBARECOMP_NO_VSYNC", "1", 1);
     unsetenv("GBARECOMP_VSYNC");
 
-    FILE* log_f = fopen("sdmc:/switch/mksc_nx/boot.log", "w");
+    FILE* log_f = fopen("sdmc:/switch/warioland4_nx/boot.log", "w");
     if (log_f) {
-        fprintf(log_f, "--- MKSC NX Boot Log ---\n");
+        fprintf(log_f, "--- Wario Land 4 NX Boot Log ---\n");
         fclose(log_f);
     }
 
     log_boot("Verified directories.\n");
 
-    SDL_LogSetOutputFunction([](void* userdata, int category, SDL_LogPriority priority, const char* message) {
+    SDL_LogSetOutputFunction([](void*, int, SDL_LogPriority priority, const char* message) {
         log_boot("[SDL] (%d) %s\n", priority, message);
     }, nullptr);
 
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
 
-    FILE* rom = fopen("sdmc:/switch/mksc_nx/rom.gba", "rb");
+    std::string rom_path = "sdmc:/switch/warioland4_nx/rom.gba";
+    FILE* rom = fopen(rom_path.c_str(), "rb");
+    if (!rom) {
+        rom_path = "sdmc:/switch/warioland4_nx/Wario Land 4 (USA, Europe).gba";
+        rom = fopen(rom_path.c_str(), "rb");
+    }
     if (rom) {
         fseek(rom, 0, SEEK_END);
         long size = ftell(rom);
         fclose(rom);
-        log_boot("Found rom.gba: %ld bytes.\n", size);
+        log_boot("Found ROM (%s): %ld bytes.\n", rom_path.c_str(), size);
     } else {
-        log_boot("ERROR: Missing sdmc:/switch/mksc_nx/rom.gba!\n");
-        printf("ERROR: Missing rom.gba!\n");
+        log_boot("ERROR: Missing sdmc:/switch/warioland4_nx/rom.gba!\n");
+        printf("ERROR: Missing sdmc:/switch/warioland4_nx/rom.gba!\n");
         svcSleepThread(5000000000ULL);
         return 1;
     }
 
-    FILE* bios = fopen("sdmc:/switch/mksc_nx/gba_bios.bin", "rb");
+    FILE* bios = fopen("sdmc:/switch/warioland4_nx/gba_bios.bin", "rb");
     if (bios) {
         fseek(bios, 0, SEEK_END);
         long size = ftell(bios);
         fclose(bios);
         log_boot("Found gba_bios.bin: %ld bytes.\n", size);
     } else {
-        log_boot("ERROR: Missing sdmc:/switch/mksc_nx/gba_bios.bin!\n");
-        printf("ERROR: Missing gba_bios.bin!\n");
+        log_boot("ERROR: Missing sdmc:/switch/warioland4_nx/gba_bios.bin!\n");
+        printf("ERROR: Missing sdmc:/switch/warioland4_nx/gba_bios.bin!\n");
         svcSleepThread(5000000000ULL);
         return 1;
     }
@@ -146,23 +159,24 @@ int main(int argc, char** argv) {
     log_boot("kDispatchTableLen = %u\n", kDispatchTableLen);
 
     bool config_widescreen = true;
-    bool config_fps60 = true;
     bool config_linear_filter = false;
-    bool config_high_res_affine = false;
     bool config_vsync = false;
     bool config_uncapped = false;
-    int config_cpu_boost = 0; // 0 = Normal (1020 MHz CPU, full GPU 307/768 MHz), 1 = FastLoad (1785 MHz CPU, min GPU), 2 = Type2 (1020 MHz CPU, min GPU)
+    bool config_bios_hle = true;
+    int config_cpu_boost = 0;  // 0 = Normal, 1 = FastLoad, 2 = Type2
     g_config_show_fps = false;
+    g_config_audio = true;
 
-    std::string config_paths[] = {
-        "sdmc:/switch/mksc_nx/config.txt",
-        "sdmc:/switch/mksc-nx/config.txt",
+    const std::string config_paths[] = {
+        "sdmc:/switch/warioland4_nx/config.txt",
+        "sdmc:/switch/warioland4-nx/config.txt",
         "./config.txt"
     };
 
     std::string loaded_config_path;
     std::ifstream config_file;
     for (const auto& path : config_paths) {
+        config_file.clear();
         config_file.open(path);
         if (config_file.is_open()) {
             loaded_config_path = path;
@@ -174,34 +188,25 @@ int main(int argc, char** argv) {
         log_boot("Loaded config from %s\n", loaded_config_path.c_str());
         std::string line;
         while (std::getline(config_file, line)) {
-            // Ignorer les lignes vides et les commentaires
-            size_t first = line.find_first_not_of(" \t\r\n");
+            const size_t first = line.find_first_not_of(" \t\r\n");
             if (first == std::string::npos || line[first] == '#' || line[first] == ';') continue;
-            // Strip whitespace
             line.erase(std::remove_if(line.begin(), line.end(), ::isspace), line.end());
 
-            auto eq = line.find('=');
+            const auto eq = line.find('=');
             if (eq != std::string::npos) {
                 std::string key = line.substr(0, eq);
                 std::string val = line.substr(eq + 1);
-                for (auto& c : key) c = static_cast<char>(std::tolower(c));
-                for (auto& c : val) c = static_cast<char>(std::tolower(c));
+                for (auto& c : key) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+                for (auto& c : val) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
                 const bool is_true = (val == "1" || val == "true" || val == "on" || val == "yes");
                 const bool is_false = (val == "0" || val == "false" || val == "off" || val == "no");
 
                 if (key == "widescreen") {
                     if (is_true) config_widescreen = true;
                     else if (is_false) config_widescreen = false;
-                } else if (key == "fps60" || key == "60fps" || key == "fps_60" || key == "60_fps" ||
-                           key == "track_60fps" || key == "track60fps" || key == "track_fps60") {
-                    if (is_true) config_fps60 = true;
-                    else if (is_false) config_fps60 = false;
                 } else if (key == "linear_filter" || key == "linearfilter") {
                     if (is_true) config_linear_filter = true;
                     else if (is_false) config_linear_filter = false;
-                } else if (key == "high_res_affine" || key == "highresaffine") {
-                    if (is_true) config_high_res_affine = true;
-                    else if (is_false) config_high_res_affine = false;
                 } else if (key == "show_fps" || key == "showfps") {
                     if (is_true) g_config_show_fps = true;
                     else if (is_false) g_config_show_fps = false;
@@ -216,27 +221,31 @@ int main(int argc, char** argv) {
                 } else if (key == "audio") {
                     if (is_true) g_config_audio = true;
                     else if (is_false) g_config_audio = false;
+                } else if (key == "bios_hle" || key == "bioshle") {
+                    if (is_true) config_bios_hle = true;
+                    else if (is_false) config_bios_hle = false;
                 }
             }
         }
     } else {
-        log_boot("Config not found, creating default at sdmc:/switch/mksc_nx/config.txt\n");
-        std::ofstream new_config("sdmc:/switch/mksc_nx/config.txt");
+        log_boot("Config not found, creating default at sdmc:/switch/warioland4_nx/config.txt\n");
+        std::ofstream new_config("sdmc:/switch/warioland4_nx/config.txt");
         new_config << "widescreen = 1\n";
-        new_config << "fps60 = 1\n";
         new_config << "vsync = 0\n";
         new_config << "uncapped = 0\n";
         new_config << "cpu_boost = 0\n";
-        new_config << "high_res_affine = 0\n";
         new_config << "linear_filter = 0\n";
         new_config << "show_fps = 0\n";
         new_config << "audio = 1\n";
+        new_config << "bios_hle = 1\n";
     }
+
     ApmCpuBoostMode boost_mode = ApmCpuBoostMode_Normal;
     if (config_cpu_boost == 1) boost_mode = ApmCpuBoostMode_FastLoad;
     else if (config_cpu_boost == 2) boost_mode = ApmCpuBoostMode_Type2;
     const Result boost_rc = appletSetCpuBoostMode(boost_mode);
     log_boot("CPU boost mode %d rc=0x%08x\n", config_cpu_boost, boost_rc);
+
     if (config_vsync) {
         setenv("GBARECOMP_VSYNC", "1", 1);
         unsetenv("GBARECOMP_NO_VSYNC");
@@ -244,115 +253,75 @@ int main(int argc, char** argv) {
         setenv("GBARECOMP_NO_VSYNC", "1", 1);
         unsetenv("GBARECOMP_VSYNC");
     }
-    log_boot("Config: widescreen=%d, fps60=%d, vsync=%d, uncapped=%d, cpu_boost=%d, high_res_affine=%d, linear_filter=%d, show_fps=%d\n",
-             config_widescreen, config_fps60, config_vsync, config_uncapped, config_cpu_boost, config_high_res_affine, config_linear_filter, g_config_show_fps);
+    setenv("GBARECOMP_BIOS_HLE", config_bios_hle ? "1" : "0", 1);
+
+    log_boot("Config: widescreen=%d, vsync=%d, uncapped=%d, cpu_boost=%d, linear_filter=%d, show_fps=%d, audio=%d, bios_hle=%d\n",
+             config_widescreen, config_vsync, config_uncapped, config_cpu_boost,
+             config_linear_filter, g_config_show_fps, g_config_audio, config_bios_hle);
 #endif
+
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "--version") == 0) {
-            std::printf("MarioKartSuperCircuitRecomp v%s\n", MKSC_VERSION);
+            std::printf("WarioLand4Recomp v%s\n", WL4_VERSION);
             return 0;
         }
         if (std::strcmp(argv[i], "--help") == 0 ||
             std::strcmp(argv[i], "-h") == 0) {
             std::printf(
-                "MarioKartSuperCircuitRecomp [--bios <path>] [--rom <path>] [game.toml]\n");
+                "WarioLand4Recomp [--bios <path>] [--rom <path>] [--view-width <240..284>] [game.toml]\n");
             return 0;
         }
     }
-    g_runtime_ram_dispatch_hook = &mksc::flash_stack_dispatch;
+
     gbarecomp::RunOptions opts;
     std::vector<std::string> args(argv, argv + argc);
 
-#if defined(__SWITCH__)
-    // Enforce Paths and Options for Switch
-
-
-    opts.launcher_save_path = "sdmc:/switch/mksc_nx/save/mario_kart_super_circuit_usa.sav";
-#endif
-
-#if defined(GBAGAME_NETPLAY) && !defined(__SWITCH__)
-    opts.netplay=gbarecomp::make_gba_netplay_launch("mksc-usa",GBARECOMP_NETPLAY_BUILD_ID,
-        "aadc8b9f3c947ff6f610b6c8d7fddaaa9bea98b4bd43576df84f26c457ae1f90");
-    opts.netplay->view_policy = {true, true, mksc::install_extended_view,
-        nullptr, mksc::reset_extended_view};
-    opts.netplay->view_policy.high_resolution_affine_provider = &mksc::high_resolution_affine_provider;
-    try { gbarecomp::parse_gba_netplay_arguments(args,*opts.netplay); }
-    catch (const std::exception& e) { std::fprintf(stderr,"netplay: %s\n",e.what()); return 1; }
-#endif
-    opts.builtin_game_name = "Mario Kart: Super Circuit (USA)";
-    opts.builtin_rom_sha1 = "9d327c030c3e2d9007990518594f70c3340ac56f";
-    opts.builtin_rom_crc32 = 0xED316E37u;
-    opts.mod_game_id = "mario-kart-super-circuit-us";
-    opts.mod_owns_adaptive_view = true;
-#if defined(__SWITCH__)
-    opts.high_resolution_affine_provider = config_high_res_affine ? &mksc::high_resolution_affine_provider : nullptr;
-    if (config_widescreen) {
-        opts.max_view_width = 480;
-        opts.max_resize_view_width = 480;
-        opts.resize_driven_view = true;
-        opts.extended_view_init = &mksc::install_extended_view;
-    } else {
-        opts.max_view_width = 240;
-        opts.max_resize_view_width = 240;
-        opts.resize_driven_view = false;
-        opts.extended_view_init = nullptr;
-    }
-#else
-    opts.high_resolution_affine_provider = &mksc::high_resolution_affine_provider;
-    opts.max_view_width = 480;
-    opts.max_resize_view_width = 480;
-    opts.resize_driven_view = true;
-    opts.extended_view_init = &mksc::install_extended_view;
-#endif
-    // Zero retains existing mod selections when upgrading an older config.
-    // Explicit Display modes override the optional view mod for this run.
-    static const char* const view_labels[] = {"Default (Mods)", "Native (3:2)", "16:9"};
-    static const uint16_t view_widths[] = {0, 240, 284};
-    opts.launcher_aspect_labels = view_labels;
-    opts.launcher_aspect_view_widths = view_widths;
-    opts.launcher_num_aspects = 3;
+    opts.builtin_game_name = "Wario Land 4";
+    opts.builtin_rom_sha1 = "b9fe05a8080e124b67bce6a623234ee3b518a2c1";
+    opts.builtin_rom_crc32 = 0xD6141609u;
+    opts.freely_resizable_window = true;
+    opts.expose_assist_tools = false;
+    opts.resize_driven_view = false;
+    opts.max_resize_view_width = 240;
+    opts.widescreen_view_width = 284;
+    opts.launcher_region = "USA/Europe";
     opts.launcher_expose_widescreen = true;
-    opts.launcher_expose_adaptive_view = true;
-    opts.launcher_expose_sharp_filter = true;
-    opts.launcher_default_sharp_filter = true;
-    opts.launcher_expose_affine_filter = true;
-    opts.launcher_default_affine_filter = true;
-    opts.launcher_region = "USA";
-#if !defined(__SWITCH__)
-    // The launcher reads [rom].path and [bios].path from this file when its
-    // per-user cache is empty, so the verified local ROM is preselected.
-    opts.launcher_game_config = "game.toml";
-    opts.launcher_save_path = "saves/mario_kart_super_circuit_usa.sav";
-#endif
-
-
-
-#if defined(GBAGAME_RECOMP_UI) && !defined(__SWITCH__)
-    if (game_launcher_preboot(args, opts)) return 0;
-#endif
+    opts.launcher_expose_adaptive_view = false;
 
 #if defined(__SWITCH__)
+    opts.launcher_save_path = "sdmc:/switch/warioland4_nx/save/wario_land_4_awae.sav";
+    opts.max_view_width = config_widescreen ? 284 : 240;
     opts.show_fps_by_default = g_config_show_fps;
-    gba_mod_set_adaptive_view_user_config(config_widescreen ? 1 : 0);
-    gba_mod_set_60fps_track_enabled(config_fps60 ? 1 : 0);
 
-    static char arg_prog[]        = "mksc_nx";
-    static char arg_bios_flag[]   = "--bios";
-    static char arg_bios_path[]   = "sdmc:/switch/mksc_nx/gba_bios.bin";
-    static char arg_rom_flag[]    = "--rom";
-    static char arg_rom_path[]    = "sdmc:/switch/mksc_nx/rom.gba";
-    static char arg_linear_flag[] = "--linear-filter";
+    static char arg_prog[]          = "warioland4_nx";
+    static char arg_bios_flag[]     = "--bios";
+    static char arg_bios_path[]     = "sdmc:/switch/warioland4_nx/gba_bios.bin";
+    static char arg_rom_flag[]      = "--rom";
+    static char arg_save_flag[]     = "--save";
+    static char arg_save_path[]     = "sdmc:/switch/warioland4_nx/save/wario_land_4_awae.sav";
+    static char arg_view_flag[]     = "--view-width";
+    static char arg_view_wide[]     = "284";
+    static char arg_view_native[]   = "240";
+    static char arg_linear_flag[]   = "--linear-filter";
     static char arg_uncapped_flag[] = "--uncapped";
-    static char arg_hle[] = "--bios-hle";
+    static char arg_hle[]           = "--bios-hle";
+
+    std::vector<char> rom_arg_buf(rom_path.begin(), rom_path.end());
+    rom_arg_buf.push_back('\0');
 
     std::vector<char*> av;
     av.push_back(argv && argv[0] ? argv[0] : arg_prog);
     av.push_back(arg_bios_flag);
     av.push_back(arg_bios_path);
     av.push_back(arg_rom_flag);
-    av.push_back(arg_rom_path);
-    av.push_back(arg_hle);
-
+    av.push_back(rom_arg_buf.data());
+    av.push_back(arg_save_flag);
+    av.push_back(arg_save_path);
+    av.push_back(arg_view_flag);
+    av.push_back(config_widescreen ? arg_view_wide : arg_view_native);
+    if (config_bios_hle) {
+        av.push_back(arg_hle);
+    }
     if (config_linear_filter) {
         av.push_back(arg_linear_flag);
     }
@@ -368,7 +337,7 @@ int main(int argc, char** argv) {
     thread_args.return_code = 0;
 
     Thread game_thread;
-    constexpr size_t kStackSize = 32 * 1024 * 1024; // 32 MiB stack
+    constexpr size_t kStackSize = 32 * 1024 * 1024;  // 32 MiB stack
     Result rc = threadCreate(&game_thread, game_runner_thread, &thread_args, nullptr, kStackSize, 0x2C, 1);
     if (R_FAILED(rc)) {
         log_boot("ERROR: Failed to create game thread (rc=0x%x)!\n", rc);
@@ -388,6 +357,15 @@ int main(int argc, char** argv) {
 
     return thread_args.return_code;
 #else
+    opts.max_view_width = 284;
+    opts.launcher_game_config = "game.toml";
+    opts.launcher_save_path = "saves/wario_land_4_awae.sav";
+
+#if defined(GBAGAME_RECOMP_UI)
+    if (game_launcher_preboot(args, opts)) return 0;
+#endif
+
+    g_runtime_force_interp_hook = &wario_force_interp_hook;
     std::vector<char*> av;
     av.reserve(args.size());
     for (auto& arg : args) av.push_back(arg.data());

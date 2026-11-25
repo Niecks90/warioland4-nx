@@ -1,131 +1,126 @@
-# Mario Kart: Super Circuit Recomp (Switch Port)
+# Wario Land 4 Recomp (Nintendo Switch)
 
-> **Nintendo Switch Homebrew Exclusive**  
-> Ported and optimized for the Nintendo Switch by **Niecks90** (v0.2.1).
+> **Nintendo Switch Homebrew Port (`warioland4-nx`)**  
+> Static recompilation of **Wario Land 4** (USA/Europe, `AWAE`) running natively on Nintendo Switch at **60 FPS** in **1280×720** (720p 16:9 widescreen).
 
-Static recompilation of **Mario Kart: Super Circuit** running natively on the Nintendo Switch at a smooth **60 FPS**, featuring multi-threaded PPU rasterization, Adaptive Widescreen (16:9), optional 60 FPS track rendering, and configurable internal resolution.
-
-The game ROM and Nintendo GBA BIOS are **not included**. You must provide your own legally obtained dumps.
+The game ROM and Nintendo GBA BIOS are **not included**. You must supply your own legally obtained dumps.
 
 ---
 
-## What's New in v0.2.1
+## Changelog — v0.1.0
 
-- **Controller Mapping Fixes**: Swapped A and B buttons to match the native Nintendo layout (A = Accelerate, B = Brake/Reverse).
-- **Rear Triggers Support (ZL / ZR)**: Rear triggers ZL and ZR now perform the same functions as L and R (Hop / Drift / Use Item).
-- **Removed Fast-Forward on ZR**: Removed the unwanted turbo / pseudo fast-forward mode triggered by ZR.
-
-## What's New in v0.2.0
-
-- **Multi-Core PPU Architecture**: PPU scanline rasterization is parallelized across **Core 0** and **Core 2** in 8-line bands, while the main emulation thread runs isolated on **Core 1** with a 32 MiB stack.
-- **Horizon-Native FramePacer**: Custom frame pacer using libnx `svcSleepThread` with spin-tails and quantum yields, eliminating the ~50 FPS timer drift and fixing all audio crackling / buffer underruns.
-- **Full Widescreen Support (16:9)**: Fixed widescreen margin detection across **all 40 courses** (including Riverside Park, Sky Garden, Boo Lake, Cheese Land, Rainbow Road) and Battle arenas.
-- **Un-throttled GPU & Memory Bus**: Default boost mode runs the CPU at 1020 MHz while leaving the Tegra X1 GPU and EMC memory bus at full speed (1600 MHz), removing memory bus starvation.
-- **ARM64 NEON Texture Presentation**: Fast SIMD ABGR8888 conversion for instant SDL2 presentation.
-- **Robust Configuration**: Case-insensitive and alias-friendly `config.txt` parser supporting `60fps`, `fps60`, `uncapped`, `cpu_boost`, and more.
-- **Custom Homebrew Icon & NACP Metadata**: Embedded 0.2.0 metadata and high-resolution application icon.
+- **Initial Nintendo Switch Port (`warioland4-nx`)**: Ported [Zaxaerith/WarioLand4Recomp](https://github.com/Zaxaerith/WarioLand4Recomp) onto our Switch-optimized `gbarecomp` runtime base (`build/warioland4-nx.nro`).
+- **Native 720p Fullscreen & 16:9 Widescreen (`284×160` → `1280×720`)**: Enabled 16:9 GBA view expansion (`284×160`, `extra_left = 22`, `extra_right = 22`) filling the Switch's `1280×720` viewport cleanly with hardware-accelerated scaling, plus clean black pillarboxing when `widescreen = 0` (`240×160`).
+- **Dynamic Stack-Stub Execution Hook**: Installed `wario_force_interp_hook` for Wario Land 4's runtime-generated IWRAM stack stubs (`0x03007D00..0x03007E00`), removing any dependency on runtime compiler self-healing.
+- **Switch Multi-Core & Performance Optimizations**:
+  - Multi-threaded scanline PPU (`switch/gba_ppu.cpp`) with band parallelization across cores, wide sprite X-wrapping, window mask fast-path, and affine fast-paths.
+  - Emulation thread pinned to Core 1 with a 32 MiB stack.
+  - ARM64 NEON RGB24→RGBA32 texture upload (`switch/host_window.cpp`) and Horizon-native `FramePacer` (`svcSleepThread` spin-tail) with `vsync = 0` default.
+- **SRAM Persistence & Symbol Support**: Configured 32 KiB SRAM (`SRAM_V112` → `wario_land_4_awae.sav`), 64-shard AOT generation (`game.toml`), and corrected `0x08xxxxxx` function/data symbols (`symbols/`).
 
 ---
 
 ## SD Card Layout
 
-Create a directory on your SD card at `sdmc:/switch/mksc_nx/` and place your files as follows:
+Create `sdmc:/switch/warioland4_nx/` on your SD card and place the files as follows:
 
+```text
+/switch/warioland4_nx/
+ ├── warioland4-nx.nro   (Homebrew executable)
+ ├── rom.gba             (Wario Land 4 USA/Europe ROM — or "Wario Land 4 (USA, Europe).gba")
+ ├── gba_bios.bin        (Retail GBA BIOS — mandatory)
+ ├── config.txt          (Auto-created on first launch)
+ └── save/               (Auto-created directory containing wario_land_4_awae.sav)
 ```
-/switch/mksc_nx/
- ├── mksc_nx.nro       (The game executable)
- ├── rom.gba           (Your Mario Kart: Super Circuit USA ROM - SHA1: 9d327c030c3e2d9007990518594f70c3340ac56f)
- ├── gba_bios.bin      (Your retail GBA BIOS - mandatory)
- ├── config.txt        (Configuration file, auto-created on first launch)
- └── save/             (Auto-created directory for game saves)
-```
+
+### Required ROM & BIOS Identity
+
+| File | Details | SHA-1 |
+|---|---|---|
+| **ROM** (`rom.gba` / `Wario Land 4 (USA, Europe).gba`) | USA / Europe (`AWAE`), 8 MiB (`8,388,608` bytes) | `b9fe05a8080e124b67bce6a623234ee3b518a2c1` |
+| **GBA BIOS** (`gba_bios.bin`) | Retail GBA BIOS, 16 KiB (`16,384` bytes) | `300c20df6731a33952ded8c436f7f186d25d3492` |
 
 > [!IMPORTANT]
-> For optimal performance, always launch this homebrew using **Title Override** (hold `R` while launching an installed retail game from the Switch home menu), rather than Applet Mode (Album).
+> Always launch homebrew via **Title Override** (hold `R` while launching a retail title from the Switch Home Menu) rather than Applet Mode (Album) for full memory and CPU performance.
 
 ---
 
 ## Controls
 
-| Switch Control | Action |
+| Switch Control | GBA Action |
 |---|---|
-| **D-Pad / Left Stick** | Steer / Navigation |
-| **A** | Accelerate |
-| **B** | Brake / Reverse |
-| **L / R / ZL / ZR** | Hop / Drift / Use Item |
-| **+ (Start)** | Pause / Menu |
-| **- (Select)** | Change Camera / View |
-| **+ and - Held Together** | **Exit the game cleanly to Homebrew Menu** |
+| **D-Pad / Left Stick** | Move / Navigate |
+| **A** | A (Jump / Confirm) |
+| **B** | B (Dash / Attack / Cancel) |
+| **L / ZL** | L |
+| **R / ZR** | R |
+| **+ (Plus)** | Start (Pause / Confirm) |
+| **- (Minus)** | Select |
+| **+ and - Held Together** | Exit cleanly to Homebrew Menu |
 
 ---
 
 ## Configuration (`config.txt`)
 
-On first launch, `config.txt` is automatically created in `sdmc:/switch/mksc_nx/config.txt` with default settings:
+On first launch, `sdmc:/switch/warioland4_nx/config.txt` is automatically created with:
 
 ```ini
 widescreen = 1
-fps60 = 1
 vsync = 0
 uncapped = 0
 cpu_boost = 0
-high_res_affine = 0
 linear_filter = 0
 show_fps = 0
 audio = 1
+bios_hle = 1
 ```
 
-### Options Explained:
+### Options
 
 - **`widescreen`** (`1` or `0`):
-  - `1` *(Default)*: Expands rendering to 16:9 (284×160) without stretching. HUD elements are edge-anchored and real course margins are drawn.
-  - `0`: Authentic original 3:2 aspect ratio (240×160) with black pillarboxes.
-- **`fps60`** or **`60fps`** (`1` or `0`):
-  - `1` *(Default)*: Recalculates the Mode 7 perspective track every frame (60 FPS) for maximum visual smoothness.
-  - `0`: Generates the track every second frame (30 FPS), exactly as authored on the original GBA hardware (saves CPU load).
+  - `1` *(Default)*: 16:9 widescreen (`284×160`) scaled cleanly to `1280×720`.
+  - `0`: Authentic 3:2 aspect ratio (`240×160`) centered with black pillarboxing.
 - **`vsync`** (`0` or `1`):
-  - `0` *(Default)*: Uses the Horizon-native `FramePacer` to pace to the GBA's exact 59.7275 Hz refresh rate without blocking the emulation thread on HDMI scanout.
-  - `1`: Synchronizes presentation directly with the Switch display refresh.
+  - `0` *(Default)*: Uses the Horizon-native `FramePacer` at `59.7275 Hz` without blocking Core 1 on HDMI scanout.
+  - `1`: Enables `SDL_RENDERER_PRESENTVSYNC`.
+- **`uncapped`** (`0` or `1`): Disables frame pacing when set to `1`.
 - **`cpu_boost`** (`0`, `1`, or `2`):
-  - `0` *(Default / Recommended)*: Normal mode (CPU 1020 MHz, GPU un-throttled up to 768 MHz, memory EMC at full 1600 MHz).
-  - `1`: FastLoad mode (CPU clocked up to 1785 MHz for heavy workloads or high-res affine).
-  - `2`: Type2 legacy mode (CPU 1020 MHz, GPU throttled to 76.8 MHz).
-- **`uncapped`** (`0` or `1`):
-  - `0` *(Default)*: Paced to 59.7275 Hz.
-  - `1`: Disables frame pacing for benchmarking and profiling.
-- **`high_res_affine`** (`0` or `1`): Enables higher internal resolution for the Mode 7 perspective track.
-- **`linear_filter`** (`0` or `1`): Enables bilinear texture filtering.
-- **`show_fps`** (`0` or `1`): Displays an on-screen FPS counter in the upper-left corner.
-- **`audio`** (`1` or `0`): Enables or disables sound output.
+  - `0` *(Default)*: Normal mode (`1020 MHz` CPU, un-throttled GPU/EMC).
+  - `1`: FastLoad (`1785 MHz` CPU).
+  - `2`: Type2 (`1020 MHz` CPU, minimum GPU).
+- **`linear_filter`** (`0` or `1`): `0` uses crisp nearest-neighbor scaling; `1` enables bilinear filtering.
+- **`show_fps`** (`0` or `1`): Displays an on-screen FPS counter.
+- **`audio`** (`1` or `0`): Enables or disables audio output.
+- **`bios_hle`** (`1` or `0`): `1` *(Default)* enables fast BIOS SWI HLE with recompiled LLE fallback; `0` runs pure recompiled BIOS LLE.
 
 ---
 
 ## Building from Source
 
-Building requires [devkitPro](https://devkitpro.org/) with the `devkitA64` toolchain and Switch portlibs installed.
+Building requires [devkitPro](https://devkitpro.org/) (`devkitA64`, `libnx`, Switch `SDL2` portlibs), CMake 3.20+, and your own verified `Wario Land 4 (USA, Europe).gba` ROM in the repository root.
 
 ```bash
-export DEVKITPRO=/opt/devkitpro
-export DEVKITA64=/opt/devkitpro/devkitA64
-export PATH=/opt/devkitpro/tools/bin:$DEVKITA64/bin:$PATH
+# 1. Build host gba_recompile and generate the 64 C++ shards into generated/
+./generator.sh
 
+# 2. Cross-compile and link build/warioland4-nx.nro
 ./build_switch.sh
 ```
 
-The output executable `mksc_nx.nro` will be placed in `build/`.
+The final homebrew executable is generated at `build/warioland4-nx.nro`.
 
 ---
 
 ## Credits
 
-- **Niecks90**: Nintendo Switch port, multi-core architecture, performance optimizations, Horizon FramePacer, and build integration.
-- **mstan**: Original `gbarecomp` framework and `MarioKartSuperCircuitRecomp` project.
-- **antimattur**: 60 FPS track patch research and decompilation contributions.
-- **jellees**: Additional decompilation and reverse-engineering work.
-- **devkitPro**: Nintendo Switch homebrew toolchain (`devkitA64`, `libnx`).
+- **Niecks90**: Nintendo Switch port, 720p/16:9 presentation, Switch PPU & Horizon runtime integration.
+- **Zaxaerith**: [WarioLand4Recomp](https://github.com/Zaxaerith/WarioLand4Recomp) configuration, discovery metadata, and `wario_force_interp_hook`.
+- **mstan**: [gbarecomp](https://github.com/mstan/gbarecomp) static recompilation framework.
+- **lilDavid**: [warioland4](https://github.com/lilDavid/warioland4) decompilation and symbol names.
+- **devkitPro**: `devkitA64` / `libnx` Nintendo Switch toolchain.
 
 ---
 
 ## Legal
 
-This is an unofficial, non-commercial preservation and educational project. It is not affiliated with, authorized, or endorsed by Nintendo. All trademarks, registered trademarks, game titles, and assets are property of their respective owners. No copyrighted game assets, ROMs, or BIOS binaries are provided.
+This is an unofficial, non-commercial preservation and educational project. It is not affiliated with, authorized, or endorsed by Nintendo. All trademarks, game titles, and assets belong to their respective owners. No copyrighted ROMs, BIOS dumps, or ROM-derived generated code are distributed in this repository.

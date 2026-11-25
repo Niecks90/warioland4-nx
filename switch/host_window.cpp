@@ -1605,8 +1605,25 @@ PresentationLayout current_presentation_layout(Backend* b, int* out_w, int* out_
         // texture and destination cannot disagree on backends whose renderer
         // output stays pinned to the original streaming target.
 #if defined(__SWITCH__)
-        if (SDL_GetRendererOutputSize(b->renderer, &drawable_w, &drawable_h) != 0) {
+        if (SDL_GetRendererOutputSize(b->renderer, &drawable_w, &drawable_h) != 0 ||
+            drawable_w <= 0 || drawable_h <= 0) {
             SDL_GetWindowSize(b->window, &drawable_w, &drawable_h);
+        }
+        if (drawable_w <= 0 || drawable_h <= 0) {
+            drawable_w = 1280;
+            drawable_h = 720;
+        }
+        if (b->expanded_view && !b->resize_driven_view &&
+            b->base_w == 284 && b->base_h == 160 &&
+            drawable_w * 9 == drawable_h * 16) {
+            // 284x160 is the GBA 16:9 widescreen width (160 * 16 / 9 = 284.44);
+            // fill the Switch's 1280x720 (or 1920x1080) 16:9 viewport cleanly
+            // without 1px side bars.
+            layout = {0, 0, drawable_w, drawable_h, 0};
+        } else {
+            layout = b->resize_driven_view
+                ? compute_adaptive_presentation_layout(drawable_w, drawable_h, b->base_w, b->base_h)
+                : compute_presentation_layout(drawable_w, drawable_h, b->base_w, b->base_h);
         }
 #else
         if (b->resize_driven_view) {
@@ -1615,10 +1632,10 @@ PresentationLayout current_presentation_layout(Backend* b, int* out_w, int* out_
                        b->renderer, &drawable_w, &drawable_h) != 0) {
             SDL_GetWindowSize(b->window, &drawable_w, &drawable_h);
         }
-#endif
         layout = b->resize_driven_view
             ? compute_adaptive_presentation_layout(drawable_w, drawable_h, b->base_w, b->base_h)
             : compute_presentation_layout(drawable_w, drawable_h, b->base_w, b->base_h);
+#endif
     }
 #endif
     // Portrait top anchoring (per-present game request): the image hugs the
@@ -2427,7 +2444,11 @@ void HostWindow::present(const uint8_t* rgb888, unsigned sampled_w, unsigned sam
         rgb888 = b->graded_fb.data();
     }
     upload_rgb24_texture(b, rgb888, texture_w, texture_h);
+#if defined(__SWITCH__)
+    SDL_SetRenderDrawColor(b->renderer, 0, 0, 0, 255);
+#else
     SDL_SetRenderDrawColor(b->renderer, 7, 11, 20, 255);
+#endif
     SDL_RenderClear(b->renderer);
 #if defined(__ANDROID__)
     if (!b->insets_from_env && g_android_insets_known.load()) {

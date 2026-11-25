@@ -5,10 +5,8 @@ roms/
 /build*/
 *.gba
 *.GBA
-generated/*.c
-generated/*.cpp
-generated/*.h
-generated/*.json
+*:Zone.Identifier
+generated/*
 build/
 build-*/
 release-stage/
@@ -19,6 +17,9 @@ saves/
 *.exe
 *.dll
 *.pdb
+*.nro
+*.nacp
+*.elf
 *.log
 *.bmp
 *.png
@@ -30,8 +31,7 @@ keybinds.ini
 recomp_coverage*.json
 recomp_master_misses*.toml.frag
 recomp_seed_proposals.toml
+TASK.md
 .vs/
 .vscode/
 __pycache__/
-symbols/mksc_readelf_*.txt
-symbols/mksc.map
